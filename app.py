@@ -5,8 +5,8 @@ import streamlit as st
 
 st.set_page_config(layout="wide")
 
-def extract_kundennummer(path_string: str):
-    """Extrahiert die Kundennummer aus ...FF/<KUNDENNR>/... oder ...FF\<KUNDENNR>\..."""
+def extract_customer_number(path_string: str):
+    """Extracts the customer number from ...FF/<CUSTOMER_NO>/... or ...FF\<CUSTOMER_NO>\..."""
     if pd.isna(path_string):
         return None
 
@@ -17,100 +17,100 @@ def extract_kundennummer(path_string: str):
     return None
 
 
-def berechne_auswertung(df: pd.DataFrame) -> pd.DataFrame:
-    # Spalten anhand Index (A=0, B=1, ..., J=9)
-    betrag_col = df.columns[6]    # Spalte G
-    paketnr_col = df.columns[3]   # Spalte D
-    j_col = df.columns[9]         # Spalte J
+def compute_report(df: pd.DataFrame) -> pd.DataFrame:
+    # Columns by index (A=0, B=1, ..., J=9)
+    amount_col = df.columns[6]    # Column G
+    package_no_col = df.columns[3]   # Column D
+    j_col = df.columns[9]         # Column J
 
-    # Kundennummer extrahieren
-    df["Kundennummer"] = df[j_col].apply(extract_kundennummer)
+    # Extract customer number
+    df["Customer_Number"] = df[j_col].apply(extract_customer_number)
 
-    # Betrag normalisieren (z.B. "1.234,56" -> 1234.56)
-    df["Betrag_num"] = (
-        df[betrag_col]
+    # Normalize amount (e.g. "1.234,56" -> 1234.56)
+    df["Amount_num"] = (
+        df[amount_col]
         .astype(str)
         .str.replace(".", "", regex=False)
         .str.replace(",", ".", regex=False)
     )
-    df["Betrag_num"] = pd.to_numeric(df["Betrag_num"], errors="coerce").fillna(0.0)
+    df["Amount_num"] = pd.to_numeric(df["Amount_num"], errors="coerce").fillna(0.0)
 
-    df_kunden = df.dropna(subset=["Kundennummer"])
+    df_customers = df.dropna(subset=["Customer_Number"])
 
     grouped = (
-        df_kunden
-        .groupby("Kundennummer")
+        df_customers
+        .groupby("Customer_Number")
         .agg(
-            Pakete=(paketnr_col, "nunique"),
-            Zeilen=("Kundennummer", "size"),
-            Kosten_gesamt=("Betrag_num", "sum")
+            Packages=(package_no_col, "nunique"),
+            Rows=("Customer_Number", "size"),
+            Total_Cost=("Amount_num", "sum")
         )
         .reset_index()
     )
 
-    # Zuschläge
-    grouped["Energie_23_5"]      = grouped["Kosten_gesamt"] * 0.235
-    grouped["Season_Peak_1"]     = grouped["Kosten_gesamt"] * 0.01
-    grouped["Klima_Protect_2"]   = grouped["Kosten_gesamt"] * 0.02
+    # Surcharges
+    grouped["Energy_23_5"]        = grouped["Total_Cost"] * 0.235
+    grouped["Season_Peak_1"]      = grouped["Total_Cost"] * 0.01
+    grouped["Climate_Protect_2"]  = grouped["Total_Cost"] * 0.02
 
-    grouped["Gesamt_mit_Zuschlaegen"] = (
-        grouped["Kosten_gesamt"]
-        + grouped["Energie_23_5"]
+    grouped["Total_with_Surcharges"] = (
+        grouped["Total_Cost"]
+        + grouped["Energy_23_5"]
         + grouped["Season_Peak_1"]
-        + grouped["Klima_Protect_2"]
-    )
-    # Durchschnitt pro Paket
-    grouped["Durchschnitt_pro_Paket"] = (
-        grouped["Gesamt_mit_Zuschlaegen"] / grouped["Pakete"]
+        + grouped["Climate_Protect_2"]
     )
 
+    # Average per package
+    grouped["Average_per_Package"] = (
+        grouped["Total_with_Surcharges"] / grouped["Packages"]
+    )
 
     return grouped
 
 
 # ---------------------------
-# STREAMLIT-APP
+# STREAMLIT APP
 # ---------------------------
 
-st.title("Kunden-Auswertung Versandkosten")
+st.title("Customer Shipping Cost Report")
 
-st.write("Lade hier die CSV-Datei hoch (z.B. Export aus deinem System).")
+st.write("Upload your CSV file here (e.g., export from your system).")
 
-uploaded_file = st.file_uploader("Datei auswählen", type=["csv"])
+uploaded_file = st.file_uploader("Choose a file", type=["csv"])
 
 if uploaded_file is not None:
-    # Versuch mit ; als Trennzeichen (typisch in DE-Exporten)
+    # Try ; as separator (common in DE exports)
     try:
         df = pd.read_csv(uploaded_file, sep=";", dtype=str, encoding="latin1")
     except Exception:
         uploaded_file.seek(0)
         df = pd.read_csv(uploaded_file, dtype=str)
 
-    st.write("Vorschau der eingelesenen Datei:")
+    st.write("Preview of the imported file:")
     st.dataframe(df.head())
 
-    if st.button("Auswertung starten"):
+    if st.button("Start analysis"):
         try:
-            result = berechne_auswertung(df)
+            result = compute_report(df)
 
-            st.success("Auswertung fertig!")
-            st.write("Ergebnis (Vorschau):")
+            st.success("Analysis completed!")
+            st.write("Result (preview):")
             st.dataframe(result.head())
 
-            # Excel in den Speicher schreiben
+            # Write Excel to memory
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                result.to_excel(writer, index=False, sheet_name="Auswertung")
+                result.to_excel(writer, index=False, sheet_name="Report")
             output.seek(0)
 
             st.download_button(
-                label="📥 Excel-Datei herunterladen",
+                label="📥 Download Excel file",
                 data=output,
-                file_name="auswertung_pro_kunde.xlsx",
+                file_name="report_per_customer.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
         except Exception as e:
-            st.error(f"Fehler bei der Auswertung: {e}")
+            st.error(f"Error during analysis: {e}")
 else:
-    st.info("Bitte eine CSV-Datei hochladen.")
+    st.info("Please upload a CSV file.")
